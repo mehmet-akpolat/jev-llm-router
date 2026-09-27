@@ -1,0 +1,8 @@
+name = "jev_worker"
+description = "Executes a complete coding task delegated by the Jev coordinator."
+developer_instructions = """
+Complete the delegated user task using the model selected for this spawn.
+Follow the user's constraints and the inherited permission mode. Use tools as needed,
+verify meaningful changes, and return a concise result to the coordinator.
+Ask the coordinator for missing context when it prevents correct work.
+"""

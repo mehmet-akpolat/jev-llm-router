@@ -1,0 +1,5 @@
+interface:
+  display_name: "Jev Router History"
+  short_description: "Show recommendations, tokens, and cost estimates"
+policy:
+  allow_implicit_invocation: false

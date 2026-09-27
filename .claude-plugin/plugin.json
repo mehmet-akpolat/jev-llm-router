@@ -1,0 +1,6 @@
+{
+  "name": "jev-router",
+  "description": "Choose a Claude worker model for each prompt with TypeSafe Jev",
+  "version": "0.7.0",
+  "author": {"name": "Jev Router contributors"}
+}

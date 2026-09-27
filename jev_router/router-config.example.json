@@ -1,0 +1,65 @@
+{
+  "typesafe_model": "jev-latest",
+  "min_confidence": 0.7,
+  "timeout_ms": 5000,
+  "clients": {
+    "claude": {
+      "fallback": "claude-sonnet-5",
+      "models": [
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "description": "Small edits, formatting, simple questions and straightforward lookups",
+          "cost_weight": 1,
+          "supports_tools": true,
+          "supports_images": true,
+          "supports_thinking": true
+        },
+        {
+          "id": "claude-sonnet-5",
+          "description": "Normal coding tasks, debugging and multi-file changes",
+          "cost_weight": 2.6,
+          "supports_tools": true,
+          "supports_images": true,
+          "supports_thinking": true
+        },
+        {
+          "id": "claude-opus-5-5",
+          "description": "Difficult architecture, deep investigation and complex migrations",
+          "cost_weight": 5.2,
+          "supports_tools": true,
+          "supports_images": true,
+          "supports_thinking": true
+        }
+      ]
+    },
+    "codex": {
+      "fallback": "gpt-6-sol",
+      "models": [
+        {
+          "id": "gpt-6-luna",
+          "description": "Simple changes, short questions and routine transformations",
+          "cost_weight": 1,
+          "supports_tools": true,
+          "supports_images": true,
+          "supports_thinking": true
+        },
+        {
+          "id": "gpt-6-sol",
+          "description": "Typical software engineering tasks and multi-step debugging",
+          "cost_weight": 20,
+          "supports_tools": true,
+          "supports_images": true,
+          "supports_thinking": true
+        },
+        {
+          "id": "gpt-6-astra",
+          "description": "Hard architecture, long investigations and complex cross-system work",
+          "cost_weight": 100,
+          "supports_tools": true,
+          "supports_images": true,
+          "supports_thinking": true
+        }
+      ]
+    }
+  }
+}

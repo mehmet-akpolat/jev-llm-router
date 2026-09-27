@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "jev_router": {
+      "command": "uv",
+      "args": ["run", "--no-project", "--python", "3.11", "--directory", "${CLAUDE_PLUGIN_ROOT}", "python", "-m", "jev_router", "mcp"]
+    }
+  }
+}

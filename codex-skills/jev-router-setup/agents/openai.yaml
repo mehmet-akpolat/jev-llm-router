@@ -1,0 +1,5 @@
+interface:
+  display_name: "Jev Router Setup"
+  short_description: "Configure routing with a hidden TypeSafe key prompt"
+policy:
+  allow_implicit_invocation: false

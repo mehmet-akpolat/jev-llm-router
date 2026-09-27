@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jev-llm-router"
+version = "0.7.0"
+description = "Jev MCP model routing with Claude Code and Codex subagents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = []
+
+[project.scripts]
+jev-router = "jev_router.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["jev_router*"]
+
+[tool.setuptools.package-data]
+jev_router = ["router-config.example.json"]

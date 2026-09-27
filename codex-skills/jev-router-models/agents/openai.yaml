@@ -1,0 +1,5 @@
+interface:
+  display_name: "Jev Router Models"
+  short_description: "Show or override model pools and fallbacks"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,12 @@
+{
+  "name": "jev-router-marketplace",
+  "description": "Jev routing and token history for coding assistants",
+  "owner": {"name": "Jev Router contributors"},
+  "plugins": [
+    {
+      "name": "jev-router",
+      "source": "./",
+      "description": "Jev model recommendations and routing history"
+    }
+  ]
+}

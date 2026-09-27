@@ -1,0 +1,66 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --python 3.11 python -c \"import os,sys,runpy;sys.path.insert(0,os.environ['CLAUDE_PLUGIN_ROOT']);sys.argv=['jev-router','hook','--client','auto'];runpy.run_module('jev_router',run_name='__main__')\""
+          }
+        ]
+      }
+    ],
+    "PostModelSwitch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --python 3.11 python -c \"import os,sys,runpy;sys.path.insert(0,os.environ['CLAUDE_PLUGIN_ROOT']);sys.argv=['jev-router','hook','--client','auto'];runpy.run_module('jev_router',run_name='__main__')\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --python 3.11 python -c \"import os,sys,runpy;sys.path.insert(0,os.environ['CLAUDE_PLUGIN_ROOT']);sys.argv=['jev-router','hook','--client','auto'];runpy.run_module('jev_router',run_name='__main__')\""
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --python 3.11 python -c \"import os,sys,runpy;sys.path.insert(0,os.environ['CLAUDE_PLUGIN_ROOT']);sys.argv=['jev-router','hook','--client','auto'];runpy.run_module('jev_router',run_name='__main__')\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --python 3.11 python -c \"import os,sys,runpy;sys.path.insert(0,os.environ['CLAUDE_PLUGIN_ROOT']);sys.argv=['jev-router','hook','--client','auto'];runpy.run_module('jev_router',run_name='__main__')\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-project --python 3.11 python -c \"import os,sys,runpy;sys.path.insert(0,os.environ['CLAUDE_PLUGIN_ROOT']);sys.argv=['jev-router','hook','--client','auto'];runpy.run_module('jev_router',run_name='__main__')\"",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

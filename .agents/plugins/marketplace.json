@@ -1,0 +1,12 @@
+{
+  "name": "jev-router-marketplace",
+  "interface": {"displayName": "Jev Router"},
+  "plugins": [
+    {
+      "name": "jev-router",
+      "source": {"source": "local", "path": "./"},
+      "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+      "category": "Productivity"
+    }
+  ]
+}
