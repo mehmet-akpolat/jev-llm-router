@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 import uuid
@@ -12,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .costs import estimate_usd
-from .paths import audit_path, history_path
+from .paths import history_path
 
 
 def now() -> str:
@@ -20,9 +19,8 @@ def now() -> str:
 
 
 class History:
-    def __init__(self, path: Path | None = None, legacy_path: Path | None = None):
+    def __init__(self, path: Path | None = None):
         self.path = path or history_path()
-        self.legacy_path = legacy_path or audit_path()
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -33,7 +31,6 @@ class History:
             os.chmod(self.path, 0o600)
             connection.row_factory = sqlite3.Row
             connection.executescript("""
-                CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS turns (
                     route_id TEXT PRIMARY KEY, client TEXT NOT NULL, session_id TEXT NOT NULL,
                     native_turn_id TEXT, transcript_path TEXT, start_offset INTEGER NOT NULL,
@@ -62,37 +59,10 @@ class History:
                     PRIMARY KEY(route_id, response_id)
                 );
             """)
-            if "baseline_model" not in {row[1] for row in connection.execute("PRAGMA table_info(turns)")}:
-                connection.execute("ALTER TABLE turns ADD COLUMN baseline_model TEXT")
-            if "cache_write_tokens" not in {row[1] for row in connection.execute("PRAGMA table_info(usage_parts)")}:
-                connection.execute("ALTER TABLE usage_parts ADD COLUMN cache_write_tokens INTEGER")
-            self._import_legacy(connection)
             yield connection
             connection.commit()
         finally:
             connection.close()
-
-    def _import_legacy(self, db: sqlite3.Connection) -> None:
-        if db.execute("SELECT 1 FROM meta WHERE key='legacy_imported'").fetchone():
-            return
-        if self.legacy_path.exists():
-            with self.legacy_path.open(encoding="utf-8") as stream:
-                for number, line in enumerate(stream, 1):
-                    try:
-                        record = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if record.get("event") != "recommendation" or not all(
-                        isinstance(record.get(key), str) for key in ("at", "client", "model", "reason")
-                    ):
-                        continue
-                    route_id = f"legacy:{number}"
-                    db.execute("""INSERT OR IGNORE INTO routes
-                        (route_id, at, client, model, reason, confidence, source)
-                        VALUES (?, ?, ?, ?, ?, ?, 'legacy')""",
-                        (route_id, record["at"], record["client"], record["model"], record["reason"],
-                         record.get("confidence")))
-        db.execute("INSERT INTO meta(key,value) VALUES('legacy_imported','1')")
 
     def session_model(self, client: str, session_id: str) -> str | None:
         with self.connect() as db:

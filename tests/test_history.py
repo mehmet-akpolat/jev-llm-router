@@ -3,19 +3,16 @@ from __future__ import annotations
 import json
 import io
 import os
-import stat
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from contextlib import closing, redirect_stdout
+from contextlib import redirect_stdout
 
 from jev_router.cli import _history
 from jev_router.costs import estimate_usd
 from jev_router.history import History
 from jev_router.hooks import main as hook_main, process
-from jev_router.setup import _remove_legacy_codex_hooks
 
 
 class HistoryTests(unittest.TestCase):
@@ -28,16 +25,6 @@ class HistoryTests(unittest.TestCase):
     def tearDown(self):
         self.env.stop()
         self.temp.cleanup()
-
-    def test_legacy_import_is_idempotent_and_private(self):
-        legacy = Path(self.temp.name) / "routes.jsonl"
-        legacy.write_text(json.dumps({"at": "2026-01-01T00:00:00+00:00", "event": "recommendation",
-                                      "client": "codex", "model": "gpt-6-sol", "reason": "jev", "confidence": 0.9}) + "\n")
-        self.assertEqual(len(self.history.recent()), 1)
-        self.assertEqual(len(self.history.recent()), 1)
-        self.assertEqual(self.history.recent()[0]["usage_status"], "unknown")
-        self.assertEqual(stat.S_IMODE((Path(self.temp.name) / "history.sqlite3").stat().st_mode), 0o600)
-        self.assertTrue(legacy.exists())
 
     def test_codex_main_worker_deduplicated_and_concurrent_turns(self):
         main = Path(self.temp.name) / "main.jsonl"
@@ -139,26 +126,12 @@ class HistoryTests(unittest.TestCase):
                                             "claude-haiku-4-5-20251001"), 0.001075)
         self.assertAlmostEqual(estimate_usd(parts, "claude-sonnet-5",
                                             "claude-haiku-4-5-20251001"), 0.002795)
+        self.assertAlmostEqual(estimate_usd(parts, "gpt-5.6-terra", "gpt-5.6-terra"), 0.00235)
+        self.assertGreater(estimate_usd(parts, "gpt-5.6-terra", "gpt-5.6-terra"),
+                           estimate_usd(parts, "gpt-6-sol", "gpt-6-sol"))
         self.assertIsNone(estimate_usd([{**parts[0], "cache_write_tokens": None}],
                                        "claude-sonnet-5", "claude-haiku-4-5-20251001"))
         self.assertIsNone(estimate_usd(parts, "unknown", "claude-haiku-4-5-20251001"))
-
-    def test_existing_database_gains_cost_columns_without_losing_routes(self):
-        path = Path(self.temp.name) / "old.sqlite3"
-        with closing(sqlite3.connect(path)) as db:
-            db.execute("""CREATE TABLE turns (route_id TEXT PRIMARY KEY, client TEXT NOT NULL,
-                session_id TEXT NOT NULL, native_turn_id TEXT, transcript_path TEXT,
-                start_offset INTEGER NOT NULL, started_at TEXT NOT NULL, ended INTEGER NOT NULL DEFAULT 0)""")
-            db.execute("""CREATE TABLE usage_parts (route_id TEXT NOT NULL, source_key TEXT NOT NULL,
-                response_id TEXT NOT NULL, kind TEXT NOT NULL, input_tokens INTEGER NOT NULL,
-                output_tokens INTEGER NOT NULL, cached_input_tokens INTEGER NOT NULL,
-                total_tokens INTEGER NOT NULL, PRIMARY KEY(route_id,response_id))""")
-            db.execute("""INSERT INTO turns VALUES ('old','claude','s',NULL,NULL,0,'2026-01-01',1)""")
-            db.commit()
-        history = History(path=path)
-        with history.connect() as db:
-            self.assertIsNone(db.execute("SELECT baseline_model FROM turns WHERE route_id='old'").fetchone()[0])
-            self.assertIn("cache_write_tokens", {row[1] for row in db.execute("PRAGMA table_info(usage_parts)")})
 
     def test_claude_main_and_worker_usage_and_missing_worker(self):
         main = Path(self.temp.name) / "claude.jsonl"
@@ -228,18 +201,6 @@ class HistoryTests(unittest.TestCase):
                  "agent_id": "reused"}, "claude", self.history)
         with self.history.connect() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM subagents WHERE ended=0").fetchone()[0], 2)
-
-    def test_codex_hooks_remove_only_legacy_handlers(self):
-        original = json.dumps({"hooks": {"Stop": [{"hooks": [
-            {"type": "command", "command": "echo existing"},
-            {"type": "command", "command": "python -m jev_router hook --client codex"}
-        ]}]}})
-        first = _remove_legacy_codex_hooks(original)
-        second = _remove_legacy_codex_hooks(first)
-        self.assertEqual(first, second)
-        groups = json.loads(first)["hooks"]["Stop"]
-        self.assertEqual(len(groups), 1)
-        self.assertEqual(groups[0]["hooks"][0]["command"], "echo existing")
 
     def test_auto_hook_identifies_both_clients(self):
         events = [

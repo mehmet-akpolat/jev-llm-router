@@ -1,7 +1,8 @@
 """Notional standard-rate costs for supported native assistant models.
 
-Rates are USD per million tokens, snapshotted from the published catalogs on
-2026-09-27. They are comparison estimates, not subscription charges.
+Rates are standard-speed, short-context USD per million tokens, checked against
+the published catalogs on 2026-09-28. They are comparison estimates, not
+subscription charges. Long-context, fast-mode, and regional premiums are omitted.
 Claude: https://platform.claude.com/docs/en/about-claude/pricing
 OpenAI: https://developers.openai.com/api/docs/pricing
 """
@@ -18,6 +19,7 @@ RATES: dict[str, tuple[float, float, float, float, float]] = {
     "claude-opus-5-5": (4, 0.2, 5, 20, 1.3),
     "gpt-6-luna": (0.1, 0.01, 0.125, 0.5, 1),
     "gpt-6-sol": (2, 0.2, 2.5, 10, 1),
+    "gpt-5.6-terra": (2, 0.2, 2.5, 12, 1),
     "gpt-6-astra": (10, 1, 12.5, 50, 1),
 }
 ALIASES = {

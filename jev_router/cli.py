@@ -11,26 +11,14 @@ import sys
 import tomllib
 from pathlib import Path
 
-from .config import ConfigError, load_config
+from .config import ConfigError, load_config, validate_config
 from .credentials import read_typesafe_key
 from .history import History
 from .hooks import main as hook_main
 from .key_prompt import hidden_key_prompt
 from .mcp import run_stdio
 from .pools import set_pool
-from .paths import state_dir
-from .setup import apply_settings, back_up_legacy_claude_plugin, claude_version_warning, legacy_claude_plugin_path, planned_settings, preview_settings
-
-
-def _legacy_key_path() -> Path:
-    return state_dir() / "typesafe-key"
-
-
-def _legacy_key_for_migration() -> str | None:
-    try:
-        return _legacy_key_path().read_text(encoding="utf-8").strip() or None
-    except FileNotFoundError:
-        return None
+from .setup import allowed_client, apply_settings, bundle_client, claude_version_warning, planned_settings, preview_settings
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -42,7 +30,7 @@ def _parser() -> argparse.ArgumentParser:
     mcp.add_argument("--config")
     setup = commands.add_parser("setup", help="Preview or apply native assistant settings")
     setup.add_argument("--config")
-    setup.add_argument("--client", choices=("both", "claude", "codex"), default="both")
+    setup.add_argument("--client", choices=("both", "claude", "codex"))
     setup.add_argument("--apply", action="store_true")
     status = commands.add_parser("status", help="Show TypeSafe key status and recent recommendations")
     status.add_argument("--json", action="store_true")
@@ -60,9 +48,9 @@ def _parser() -> argparse.ArgumentParser:
     set_command.add_argument("--models", required=True, help="Comma-separated model IDs")
     set_command.add_argument("--fallback", required=True)
     set_command.add_argument("--apply", action="store_true")
-    import_command = pool_commands.add_parser("import", help="Use a complete JSON config for new model definitions")
+    import_command = pool_commands.add_parser("import", help="Import model definitions from JSON (one pool in a plugin, both in a checkout)")
     import_command.add_argument("--file", required=True)
-    import_command.add_argument("--client", choices=("both", "claude", "codex"), default="both")
+    import_command.add_argument("--client", choices=("both", "claude", "codex"))
     import_command.add_argument("--apply", action="store_true")
     hook = commands.add_parser("hook", help="Internal assistant lifecycle hook")
     hook.add_argument("--client", choices=("claude", "codex", "auto"), required=True)
@@ -115,9 +103,10 @@ def _history(limit: int, client: str | None, as_json: bool) -> None:
 def _pool(args: argparse.Namespace) -> None:
     if args.pool_command == "show":
         config = load_config()
-        selected = {args.client: config["clients"][args.client]} if args.client else config["clients"]
+        client = allowed_client(args.client) if args.client else bundle_client()
+        selected = {client: config["clients"][client]} if client and client != "both" else config["clients"]
         if args.json:
-            print(json.dumps({"clients": selected} if args.client else config, indent=2))
+            print(json.dumps({"clients": selected} if client and client != "both" else config, indent=2))
         else:
             for client, pool in selected.items():
                 print(f"{client} (fallback: {pool['fallback']})")
@@ -125,19 +114,22 @@ def _pool(args: argparse.Namespace) -> None:
                     print(f"  {model['id']}  weight={model['cost_weight']}  {model['description']}")
         return
     if args.pool_command == "set":
+        allowed_client(args.client)
         ids = [item.strip() for item in args.models.split(",")]
         if any(not item for item in ids):
             raise ValueError("--models must be a comma-separated list of model IDs")
         config = set_pool(load_config(), args.client, ids, args.fallback)
-        client = args.client
+        client = allowed_client(args.client)
     else:
-        imported = load_config(args.file)
-        client = args.client
+        client = allowed_client(args.client)
         if client == "both":
-            config = imported
+            config = load_config(args.file)
         else:
+            imported = json.loads(Path(args.file).expanduser().read_text(encoding="utf-8"))
+            if not isinstance(imported, dict) or not isinstance(imported.get("clients"), dict) or client not in imported["clients"]:
+                raise ConfigError(f"Import must contain clients.{client}")
             config = load_config()
-            config = {**config, "clients": {**config["clients"], client: imported["clients"][client]}}
+            config = validate_config({**config, "clients": {**config["clients"], client: imported["clients"][client]}})
     changes = planned_settings(config, client=client, key=read_typesafe_key(), persist_config=True)
     print(preview_settings(changes) or "Model pools already match the requested configuration")
     if args.apply:
@@ -171,15 +163,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "hook":
             return hook_main(args.client)
         elif args.command == "setup":
+            args.client = allowed_client(args.client)
             config = load_config(args.config)
-            key = read_typesafe_key() or _legacy_key_for_migration()
+            key = read_typesafe_key()
             changes = planned_settings(config, client=args.client, key=key)
             print("Assistant setup targets:")
             for path, (before, after) in changes.items():
                 state = "already configured" if before == after else "will create" if not before else "will update"
                 print(f"  {path} ({state})")
-            if args.client in {"both", "claude"} and (legacy_plugin := legacy_claude_plugin_path()):
-                print(f"  {legacy_plugin} (will move to a backup outside the skills directory)")
             print("Preview only: no files are written without --apply.\n" if not args.apply else "Applying the changes shown below.\n")
             print(preview_settings(changes) or "Assistant settings already match the router configuration")
             if args.client in {"both", "claude"}:
@@ -193,10 +184,6 @@ def main(argv: list[str] | None = None) -> int:
                     key = hidden_key_prompt()
                     changes = planned_settings(config, client=args.client, key=key)
                 backups = apply_settings(changes)
-                if args.client in {"both", "claude"}:
-                    if legacy_backup := back_up_legacy_claude_plugin():
-                        backups.append(legacy_backup)
-                _legacy_key_path().unlink(missing_ok=True)
                 print("Assistant settings applied. Backups: " + (", ".join(map(str, backups)) or "none"))
                 print("Restart the configured assistant" +
                       ("; for Codex, review and trust Jev hooks with /hooks" if args.client in {"both", "codex"} else ""))

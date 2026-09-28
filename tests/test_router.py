@@ -53,6 +53,15 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(choose_model("hello", "claude", config, api_key="test", opener=reply({"answers": []})).reason, "invalid_answer")
         low = {"answers": {"selected_model": {"type": "choice", "choice": "option_1", "confidence": 0.2}}}
         self.assertEqual(choose_model("hello", "claude", config, api_key="test", opener=reply(low)).reason, "low_confidence")
+        def select_astra(request, timeout):
+            criteria = json.loads(request.data)["questions"]["selected_model"]["criteria"]
+            self.assertEqual([value.split(":", 1)[0] for value in criteria.values()],
+                             ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra"])
+            answer = {"answers": {"selected_model": {"type": "choice", "choice": "option_3", "confidence": 0.9}}}
+            return io.BytesIO(json.dumps(answer).encode())
+
+        self.assertEqual(choose_model("hard coding", "codex", config, api_key="test", opener=select_astra).model,
+                         "gpt-6-astra")
         invalid = json.loads(json.dumps(EXAMPLE))
         invalid["clients"]["codex"]["models"][1]["id"] = invalid["clients"]["codex"]["models"][0]["id"]
         with self.assertRaisesRegex(ValueError, "Duplicate"):
@@ -63,9 +72,6 @@ class RoutingTests(unittest.TestCase):
             "JEV_ROUTER_HOME": temp + "/state", "CLAUDE_CONFIG_DIR": temp + "/claude",
             "CODEX_HOME": temp + "/codex", "TYPESAFE_API_KEY": "",
         }):
-            legacy = Path(temp) / "state" / "typesafe-key"
-            legacy.parent.mkdir()
-            legacy.write_text("ignored-secret")
             self.assertIsNone(read_typesafe_key())
             claude = Path(temp) / "claude"
             claude.mkdir()
@@ -180,7 +186,7 @@ class McpTests(unittest.TestCase):
         body = json.loads(request.data)
         self.calls.append((body, request.get_header("Authorization")))
         self.contexts.append(context)
-        choice = "option_3" if "hard" in body["state"]["task"] else "option_1"
+        choice = f"option_{len(body['questions']['selected_model']['criteria'])}" if "hard" in body["state"]["task"] else "option_1"
         return io.BytesIO(json.dumps({"answers": {"selected_model": {"type": "choice", "choice": choice, "confidence": 0.94}}}).encode())
 
     def tearDown(self):
@@ -282,7 +288,7 @@ class McpTests(unittest.TestCase):
 
 
 class SetupTests(unittest.TestCase):
-    def test_preview_migrates_old_gateway_and_is_idempotent(self):
+    def test_setup_preserves_unrelated_settings_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temp:
             env = {"JEV_ROUTER_HOME": temp + "/state", "CLAUDE_CONFIG_DIR": temp + "/claude", "CODEX_HOME": temp + "/codex"}
             with patch.dict(os.environ, env):
@@ -290,12 +296,12 @@ class SetupTests(unittest.TestCase):
                 codex = Path(env["CODEX_HOME"])
                 claude.mkdir()
                 codex.mkdir()
-                (claude / "settings.json").write_text(json.dumps({"permissions": {"defaultMode": "plan"}, "env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8765", "CLAUDE_CODE_GATEWAY_HINT_HEADERS": "1"}, "apiKeyHelper": f"{sys.executable} -m jev_router token"}))
-                (codex / "config.toml").write_text('model_provider = "jev_router"\nmodel = "gpt-6-sol"\n[features]\nhooks = true\n\n# BEGIN JEV ROUTER (managed)\n[model_providers.jev_router]\nname = "Jev Router"\n# END JEV ROUTER (managed)\n')
+                (claude / "settings.json").write_text(json.dumps({"permissions": {"defaultMode": "plan"}}))
+                (codex / "config.toml").write_text('model = "gpt-6-sol"\n[features]\nhooks = true\n')
                 changes = planned_settings(validate_config(EXAMPLE))
                 preview = preview_settings(changes)
                 self.assertIn("mcp_servers.jev_router", preview)
-                self.assertIn("apiKeyHelper", preview)
+                self.assertIn("jev-router:coordinator", preview)
                 self.assertFalse((Path(env["JEV_ROUTER_HOME"]) / "router-config.json").exists())
                 backups = apply_settings(changes)
                 self.assertEqual(len(backups), 2)
@@ -304,53 +310,44 @@ class SetupTests(unittest.TestCase):
                 codex_data = tomllib.loads((codex / "config.toml").read_text())
                 self.assertEqual(claude_data["agent"], "jev-router:coordinator")
                 model_command = (claude / "commands" / "jev-router.md").read_text()
-                self.assertIn("pool show --json", model_command)
+                self.assertIn("pool show --client claude --json", model_command)
                 self.assertIn(str(ROOT), model_command)
                 self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", model_command)
-                self.assertNotIn("apiKeyHelper", claude_data)
-                self.assertNotIn("ANTHROPIC_BASE_URL", claude_data.get("env", {}))
                 self.assertEqual(claude_data["permissions"]["defaultMode"], "plan")
-                self.assertNotIn("model_provider", codex_data)
-                self.assertEqual(codex_data["model"], "gpt-6-luna")
+                self.assertEqual(codex_data["model"], "gpt-6-sol")
+                self.assertFalse((codex / "jev-router.config.toml").exists())
                 self.assertEqual(codex_data["features"]["hooks"], True)
                 self.assertIn("jev_router", codex_data["mcp_servers"])
-                self.assertFalse((codex / "hooks.json").exists())
+                self.assertEqual(codex_data["mcp_servers"]["jev_router"]["cwd"], str(ROOT))
                 worker = (codex / "agents" / "jev-worker.toml").read_text()
                 self.assertNotIn("\nmodel =", worker)
-                self.assertFalse((claude / "skills" / "jev-router").exists())
                 self.assertEqual(preview_settings(planned_settings(validate_config(EXAMPLE))), "")
 
-    def test_key_storage_redaction_preservation_and_migration(self):
+    def test_key_storage_redaction_and_unrelated_hooks_preserved(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
             "JEV_ROUTER_HOME": temp + "/state", "CLAUDE_CONFIG_DIR": temp + "/claude",
-            "CODEX_HOME": temp + "/codex", "TYPESAFE_API_KEY": "",
+            "CODEX_HOME": temp + "/codex", "TYPESAFE_API_KEY": "settings-secret",
         }):
             claude = Path(temp) / "claude"
             codex = Path(temp) / "codex"
             claude.mkdir()
             codex.mkdir()
             (claude / "settings.json").write_text(json.dumps({"permissions": {"allow": ["Bash"]}}))
-            (codex / "hooks.json").write_text(json.dumps({"hooks": {"Stop": [{"hooks": [
-                {"type": "command", "command": "echo unrelated"},
-                {"type": "command", "command": "python -m jev_router hook --client codex"}
-            ]}]}}))
-            legacy_key = Path(temp) / "state" / "typesafe-key"
-            legacy_key.parent.mkdir()
-            legacy_key.write_text("legacy-secret")
-            changes = planned_settings(validate_config(EXAMPLE), key="legacy-secret")
+            hooks = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo unrelated"}]}]}}
+            (codex / "hooks.json").write_text(json.dumps(hooks))
+            changes = planned_settings(validate_config(EXAMPLE), key="settings-secret")
             preview = preview_settings(changes)
-            self.assertNotIn("legacy-secret", preview)
+            self.assertNotIn("settings-secret", preview)
             self.assertIn("[REDACTED]", preview)
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 self.assertEqual(cli_main(["setup", "--apply"]), 0)
-            self.assertFalse(legacy_key.exists())
             self.assertEqual(json.loads((claude / "settings.json").read_text())["permissions"], {"allow": ["Bash"]})
-            self.assertEqual(json.loads((claude / "settings.json").read_text())["env"]["TYPESAFE_API_KEY"], "legacy-secret")
-            self.assertEqual(tomllib.loads((codex / "config.toml").read_text())["mcp_servers"]["jev_router"]["env"]["TYPESAFE_API_KEY"], "legacy-secret")
-            self.assertEqual(json.loads((codex / "hooks.json").read_text())["hooks"]["Stop"][0]["hooks"], [{"type": "command", "command": "echo unrelated"}])
+            self.assertEqual(json.loads((claude / "settings.json").read_text())["env"]["TYPESAFE_API_KEY"], "settings-secret")
+            self.assertEqual(tomllib.loads((codex / "config.toml").read_text())["mcp_servers"]["jev_router"]["env"]["TYPESAFE_API_KEY"], "settings-secret")
+            self.assertEqual(json.loads((codex / "hooks.json").read_text()), hooks)
             self.assertEqual(stat.S_IMODE((claude / "settings.json").stat().st_mode), 0o600)
             self.assertEqual(stat.S_IMODE((codex / "config.toml").stat().st_mode), 0o600)
-            self.assertEqual(preview_settings(planned_settings(validate_config(EXAMPLE), key="legacy-secret")), "")
+            self.assertEqual(preview_settings(planned_settings(validate_config(EXAMPLE), key="settings-secret")), "")
 
     def test_no_gui_or_tty_gives_terminal_instruction(self):
         with patch("jev_router.key_prompt._tk_prompt", return_value=None), \
@@ -374,40 +371,21 @@ class SetupTests(unittest.TestCase):
                 self.assertEqual(run.call_args.args[0][0], executable)
                 self.assertNotIn("hidden-key", " ".join(run.call_args.args[0]))
 
-    def test_legacy_claude_plugin_is_backed_up_after_setup(self):
+    def test_failed_setup_does_not_write_custom_config(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
             "JEV_ROUTER_HOME": temp + "/state", "CLAUDE_CONFIG_DIR": temp + "/claude",
-            "CODEX_HOME": temp + "/codex", "TYPESAFE_API_KEY": "override-key",
-        }):
-            legacy = Path(temp) / "claude" / "skills" / "jev-router"
-            (legacy / ".claude-plugin").mkdir(parents=True)
-            (legacy / ".claude-plugin" / "plugin.json").write_text('{"name":"jev-router"}')
-            (legacy / "user-notes.txt").write_text("keep this")
-            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                self.assertEqual(cli_main(["setup", "--client", "claude", "--apply"]), 0)
-            self.assertFalse(legacy.exists())
-            backups = list((Path(temp) / "claude" / "jev-router-backups").glob("jev-router-*/user-notes.txt"))
-            self.assertEqual(len(backups), 1)
-            self.assertEqual(backups[0].read_text(), "keep this")
-
-    def test_failed_setup_retains_legacy_key_and_custom_config(self):
-        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
-            "JEV_ROUTER_HOME": temp + "/state", "CLAUDE_CONFIG_DIR": temp + "/claude",
-            "CODEX_HOME": temp + "/codex", "TYPESAFE_API_KEY": "",
+            "CODEX_HOME": temp + "/codex", "TYPESAFE_API_KEY": "test-secret",
         }):
             custom = json.loads(json.dumps(EXAMPLE))
             custom["clients"]["codex"]["fallback"] = "gpt-6-luna"
             custom_path = Path(temp) / "custom.json"
             custom_path.write_text(json.dumps(custom))
-            legacy_key = Path(temp) / "state" / "typesafe-key"
-            legacy_key.parent.mkdir()
-            legacy_key.write_text("legacy-secret")
-            changes = planned_settings(validate_config(custom), client="codex", key="legacy-secret")
+            changes = planned_settings(validate_config(custom), client="codex", key="test-secret")
             self.assertIn(Path(temp) / "state" / "router-config.json", changes)
             with patch("jev_router.cli.apply_settings", side_effect=OSError("write failed")):
                 with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                     self.assertEqual(cli_main(["setup", "--client", "codex", "--config", str(custom_path), "--apply"]), 1)
-            self.assertTrue(legacy_key.exists())
+            self.assertFalse((Path(temp) / "state" / "router-config.json").exists())
 
     def test_setup_without_hidden_entry_does_not_write(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {
@@ -419,10 +397,10 @@ class SetupTests(unittest.TestCase):
                 self.assertEqual(cli_main(["setup", "--client", "claude", "--apply"]), 1)
             self.assertFalse((Path(temp) / "claude" / "settings.json").exists())
 
-    def test_unmanaged_gateway_credential_is_not_removed(self):
+    def test_existing_api_key_helper_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": temp}):
             (Path(temp) / "settings.json").write_text('{"apiKeyHelper":"other-command"}')
-            with self.assertRaisesRegex(ValueError, "another apiKeyHelper"):
+            with self.assertRaisesRegex(ValueError, "apiKeyHelper"):
                 planned_settings(validate_config(EXAMPLE))
 
 
