@@ -51,7 +51,10 @@ class PluginLayoutTests(unittest.TestCase):
                         self.assertIn(f"'--client','{client}'", hook["command"])
             self.assertFalse((ROOT / client / "jev_router").exists())
         self.assertIn("PostModelSwitch", json.loads((ROOT / "claude/hooks/hooks.json").read_text())["hooks"])
-        self.assertNotIn("PostModelSwitch", json.loads((ROOT / "codex/hooks/hooks.json").read_text())["hooks"])
+        codex_hooks = json.loads((ROOT / "codex/hooks/hooks.json").read_text())["hooks"]
+        self.assertNotIn("PostModelSwitch", codex_hooks)
+        for event in ("SubagentStop", "Stop"):
+            self.assertFalse(codex_hooks[event][0]["hooks"][0].get("async", False))
         self.assertFalse((ROOT / "scripts/sync_plugin_runtime.py").exists())
 
     def test_one_package_imports_from_outside_checkout(self):

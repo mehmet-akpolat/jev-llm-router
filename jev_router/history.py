@@ -105,6 +105,11 @@ class History:
                                      ORDER BY started_at DESC LIMIT 2""", (client, session_id)).fetchall()
             return dict(rows[0]) if len(rows) == 1 else None
 
+    def get_turn(self, route_id: str) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM turns WHERE route_id=?", (route_id,)).fetchone()
+            return dict(row) if row else None
+
     def subagent(self, route_id: str, agent_id: str, *, ended: bool = False) -> None:
         with self.connect() as db:
             db.execute("""INSERT INTO subagents(route_id,agent_id,ended) VALUES(?,?,?)

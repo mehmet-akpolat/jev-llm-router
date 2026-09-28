@@ -8,6 +8,7 @@ import os
 import shutil
 import sqlite3
 import sys
+import textwrap
 import tomllib
 from pathlib import Path
 
@@ -82,22 +83,64 @@ def _history(limit: int, client: str | None, as_json: bool) -> None:
     if not records:
         print("No routing recommendations recorded yet")
         return
-    print("Recent recommendations, assistant tokens, and notional USD reduction vs the prompt's baseline model")
-    print("Negative reduction means an estimated increase; amounts include coordinator usage")
+    print("Recent recommendations and estimated USD reduction vs prompt baseline")
+    print("Negative reduction means an increase; costs include coordinator usage")
     maximum = max((item["total_tokens"] or 0 for item in records), default=0)
-    print(f"{'When (UTC)':19} {'Client':6} {'Recommended':17} {'Baseline':17} {'Main':>8} {'Worker':>8} {'Total':>8} {'Base $':>10} {'Routed $':>10} {'Est. Δ$':>11}  Tokens")
+    numeric = lambda value: "unknown" if value is None else str(value)
+    cost = lambda value: "unknown" if value is None else f"{value:.5f}"
+    reduction = lambda value: "unknown" if value is None else f"{value:+.5f}"
+    rows = []
     for item in records:
         total = item["total_tokens"]
-        bar = "" if total is None or maximum == 0 else "█" * max(1, round(total / maximum * 16))
-        numeric = lambda value: "unknown" if value is None else str(value)
-        cost = lambda value: "unknown" if value is None else f"{value:.5f}"
-        reduction = item["estimated_reduction_usd"]
-        money = "unknown" if reduction is None else f"{reduction:+.5f}"
-        print(f"{item['at'][:19]:19} {item['client'][:6]:6} {item['model'][:17]:17} "
-              f"{(item['baseline_model'] or 'unknown')[:17]:17} {numeric(item['main_tokens']):>8} "
-              f"{numeric(item['worker_tokens']):>8} {numeric(total):>8} "
-              f"{cost(item['baseline_cost_usd']):>10} {cost(item['routed_cost_usd']):>10} "
-              f"{money:>11}  {bar}")
+        rows.append((item["at"][:19], item["client"], item["model"],
+                     item["baseline_model"] or "unknown", numeric(item["main_tokens"]),
+                     numeric(item["worker_tokens"]), numeric(total),
+                     cost(item["baseline_cost_usd"]), cost(item["routed_cost_usd"]),
+                     reduction(item["estimated_reduction_usd"]),
+                     "unknown" if total is None or maximum == 0 else "█" * max(1, round(total / maximum * 16))))
+
+    wide_headers = ("When (UTC)", "Client", "Recommended", "Baseline", "Coordinator", "Worker",
+                    "Total", "Base $", "Routed $", "Cost Reduction$", "Tokens")
+    wide_widths = [max(len(header), *(len(row[index]) for row in rows))
+                   for index, header in enumerate(wide_headers)]
+    wide_width = sum(wide_widths) + len(wide_widths) - 1
+    # A captured stream has no known viewer width; use the compact table there.
+    available_width = shutil.get_terminal_size().columns if sys.stdout.isatty() else 80
+    compact = not sys.stdout.isatty() or available_width < wide_width
+    if compact:
+        groups = ((0, 1, 2, 3), (4, 5, 6, 10, 7, 8, 9))
+        identity_width = sum(wide_widths[index] for index in groups[0]) + 2 * (len(groups[0]) - 1)
+        expanded_identity = identity_width > available_width
+        for group in groups:
+            widths = [wide_widths[index] for index in group]
+            if expanded_identity and group == groups[0]:
+                print("When (UTC)  Client  Recommended  Baseline")
+            else:
+                separator = "  " if group == groups[0] else " "
+                print(separator.join(wide_headers[index].ljust(width) if index in (0, 1, 2, 3, 10)
+                                     else wide_headers[index].rjust(width)
+                                     for index, width in zip(group, widths)).rstrip())
+        for row in rows:
+            for group in groups:
+                if expanded_identity and group == groups[0]:
+                    print(f"{row[0]}  {row[1]}")
+                    for label, value in (("Recommended", row[2]), ("Baseline", row[3])):
+                        prefix = f"  {label}: "
+                        for index, part in enumerate(textwrap.wrap(value, width=max(1, available_width - len(prefix)),
+                                                                   break_long_words=True, break_on_hyphens=False)):
+                            print((prefix if index == 0 else " " * len(prefix)) + part)
+                    continue
+                widths = [wide_widths[index] for index in group]
+                separator = "  " if group == groups[0] else " "
+                print(separator.join(row[index].ljust(width) if index in (0, 1, 2, 3, 10)
+                                     else row[index].rjust(width)
+                                     for index, width in zip(group, widths)).rstrip())
+    else:
+        print(" ".join(header.ljust(width) if index in (0, 1, 2, 3, 10) else header.rjust(width)
+                       for index, (header, width) in enumerate(zip(wide_headers, wide_widths))).rstrip())
+        for row in rows:
+            print(" ".join(value.ljust(width) if index in (0, 1, 2, 3, 10) else value.rjust(width)
+                           for index, (value, width) in enumerate(zip(row, wide_widths))).rstrip())
 
 
 def _pool(args: argparse.Namespace) -> None:

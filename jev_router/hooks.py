@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -18,9 +19,11 @@ def _nonnegative(value: Any) -> int | None:
 def _records(path: Path, client: str, *, offset: int = 0, turn_id: str | None = None
              ) -> list[tuple[str, int, int, int, int, int]]:
     found: dict[str, tuple[str, int, int, int, int, int]] = {}
+    previous_codex_usage = (0, 0, 0, 0)
+    last_codex_usage: tuple[int, int, int, int] | None = None
     with path.open("rb") as stream:
-        stream.seek(offset)
-        for raw in stream:
+        while raw := stream.readline():
+            position = stream.tell() - len(raw)
             try:
                 entry = json.loads(raw)
             except (UnicodeDecodeError, json.JSONDecodeError):
@@ -29,6 +32,22 @@ def _records(path: Path, client: str, *, offset: int = 0, turn_id: str | None = 
                 continue
             payload = entry.get("payload") if isinstance(entry, dict) else None
             if client == "codex":
+                if entry.get("type") == "event_msg" and isinstance(payload, dict) and payload.get("type") == "token_count":
+                    info = payload.get("info")
+                    usage = info.get("total_token_usage") if isinstance(info, dict) else None
+                    if not isinstance(usage, dict):
+                        continue
+                    values = tuple(_nonnegative(usage.get(key, 0 if key == "cached_input_tokens" else None))
+                                   for key in ("input_tokens", "output_tokens", "cached_input_tokens", "total_tokens"))
+                    if None in values:
+                        raise ValueError("Invalid Codex cumulative usage count")
+                    if position < offset:
+                        previous_codex_usage = values
+                    else:
+                        last_codex_usage = values
+                    continue
+                if position < offset:
+                    continue
                 if entry.get("type") != "token_usage_record" or not isinstance(payload, dict):
                     continue
                 if turn_id and payload.get("root_turn_id") != turn_id:
@@ -45,6 +64,8 @@ def _records(path: Path, client: str, *, offset: int = 0, turn_id: str | None = 
                     raise ValueError("Invalid Codex usage count")
                 write = 0
             else:
+                if position < offset:
+                    continue
                 if entry.get("type") != "assistant":
                     continue
                 message = entry.get("message")
@@ -64,6 +85,13 @@ def _records(path: Path, client: str, *, offset: int = 0, turn_id: str | None = 
                 cached = read + write
                 total = inp + out
             found[response_id] = (response_id, inp, out, cached, total, write)
+    if client == "codex" and not found and last_codex_usage is not None:
+        differences = tuple(end - start for start, end in zip(previous_codex_usage, last_codex_usage))
+        if any(value < 0 for value in differences) or differences[3] != differences[0] + differences[1]:
+            raise ValueError("Inconsistent Codex cumulative usage count")
+        response_id = hashlib.sha256(f"{path.resolve()}\0{offset}\0{turn_id or ''}".encode()).hexdigest()
+        inp, out, cached, total = differences
+        return [(f"codex-cumulative:{response_id}", inp, out, cached, total, 0)]
     return list(found.values())
 
 
@@ -102,6 +130,10 @@ def process(event: dict[str, Any], client: str, history: History) -> dict[str, A
     turn = history.find_turn(client, session_id, native_turn_id)
     agent_id = event.get("agent_id")
     if name == "SubagentStart":
+        if client == "codex" and turn is None:
+            # Codex subagents have their own turn ID but retain the parent session ID.
+            # Only bind one when the parent has exactly one active turn.
+            turn = history.find_turn(client, session_id, None)
         if turn and isinstance(agent_id, str) and agent_id:
             history.subagent(turn["route_id"], agent_id)
     elif name == "SubagentStop":
@@ -111,7 +143,9 @@ def process(event: dict[str, Any], client: str, history: History) -> dict[str, A
         if route_id and isinstance(agent_id, str) and agent_id:
             transcript = _path(event.get("agent_transcript_path"))
             if transcript and transcript.is_file():
-                records = _records(transcript, client, turn_id=native_turn_id if client == "codex" else None)
+                root_turn = history.get_turn(route_id)
+                root_turn_id = root_turn["native_turn_id"] if root_turn and client == "codex" else None
+                records = _records(transcript, client, turn_id=root_turn_id)
                 history.add_usage(route_id, agent_id, "worker", records)
             history.subagent(route_id, agent_id, ended=True)
     elif name == "Stop" and turn:

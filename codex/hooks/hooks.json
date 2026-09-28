@@ -25,8 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project --python 3.11 python -c \"import os,sys,runpy;sys.path.insert(0,os.environ['PLUGIN_ROOT']);sys.argv=['jev-router','hook','--client','codex'];runpy.run_module('jev_router',run_name='__main__')\"",
-            "async": true
+            "command": "uv run --no-project --python 3.11 python -c \"import os,sys,runpy;sys.path.insert(0,os.environ['PLUGIN_ROOT']);sys.argv=['jev-router','hook','--client','codex'];runpy.run_module('jev_router',run_name='__main__')\""
           }
         ]
       }
@@ -36,8 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-project --python 3.11 python -c \"import os,sys,runpy;sys.path.insert(0,os.environ['PLUGIN_ROOT']);sys.argv=['jev-router','hook','--client','codex'];runpy.run_module('jev_router',run_name='__main__')\"",
-            "async": true
+            "command": "uv run --no-project --python 3.11 python -c \"import os,sys,runpy;sys.path.insert(0,os.environ['PLUGIN_ROOT']);sys.argv=['jev-router','hook','--client','codex'];runpy.run_module('jev_router',run_name='__main__')\""
           }
         ]
       }

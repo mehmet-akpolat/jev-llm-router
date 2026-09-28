@@ -1,6 +1,6 @@
 {
   "name": "jev-router",
-  "version": "0.9.1",
+  "version": "0.9.1+codex.20260928122132",
   "description": "Route coding tasks with TypeSafe Jev and inspect model usage",
   "skills": "./codex/skills/",
   "hooks": "./codex/hooks/hooks.json"

@@ -25,6 +25,7 @@ Open source under the [MIT License](LICENSE).
 ## How routing works
 
 ~~~mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "12px"}, "flowchart": {"nodeSpacing": 22, "rankSpacing": 22, "padding": 6, "diagramPadding": 4}}}%%
 flowchart TB
     subgraph Upper[" "]
         direction LR
@@ -151,7 +152,7 @@ After setup, send ordinary coding prompts. You do not need to prefix each prompt
 | Show or change model pools | `/jev-router` | `/skills` → **Jev Router Models** |
 | View route history | `/jev-router:history` | `/skills` → **Jev Router History** |
 
-### Route two prompts
+### Route multiple prompts
 
 The following is an **illustrative** Claude Code session. Jev's answer depends on the prompt and active model pool.
 
@@ -168,15 +169,28 @@ Worker investigates, runs tests, and reports the result.
 
 The second prompt gets a new recommendation. The coordinator should include relevant context from the first prompt when spawning the second worker.
 
-In Codex CLI, the same flow starts with ordinary prompts. Use `/skills` for the management workflows:
+In Codex CLI, use `/skills` for router commands. Coding prompts need no special prefix:
 
 ~~~text
 $ codex
 > /skills
-  Select Jev Router History
-> Show the last 5 Codex routes.
-Recent recommendations, assistant tokens, and notional USD reduction ...
+  Select Jev Router Setup
+> /hooks
+  Review and trust the Jev Router hooks
+> Create a Python module with add(a, b), a two-integer CLI, and a test.
+> Add subtract(a, b) and a test. Keep the add CLI working.
+> Add multiply(a, b) and a test. Run all tests.
+> /skills
+  Select Jev Router History, then ask for the last 3 Codex routes
 ~~~
+
+Each coding prompt gets a fresh Jev recommendation. The coordinator passes the relevant earlier context to its worker. In a live `codex exec` check, three completed prompts in one scratch-project conversation used the ordinary `gpt-6-sol` coordinator model. Jev chose `gpt-6-luna` once per prompt, and each worker transcript reported `gpt-6-luna` as its running model:
+
+| Prompt | Jev confidence | Result |
+| --- | --- | --- |
+| Create `add(a, b)`, a two-integer CLI, and a test | 0.74 | 1 test passed; `12 -4` printed `8` |
+| Add `subtract(a, b)` and a test | 0.82 | 2 tests passed; add CLI still worked |
+| Add `multiply(a, b)` and a test | 0.88 | 3 tests passed; add CLI still worked |
 
 ### Inspect or change a model pool
 
@@ -194,22 +208,30 @@ The model command previews the pool change before applying it. In Codex, select 
 
 The bundled [model configuration](jev_router/router-config.example.json) is the default. `cost_weight` is a relative price proxy **within one client's pool**; Jev also considers likely reasoning, output, tool-loop length, and retries. The bundled weights are 1 / 2.6 / 5.2 for Claude Haiku 4.5 / Sonnet 5 / Opus 5.5 and 1 / 20 / 100 for Codex GPT-6 Luna / Sol / Astra. Weights use published standard rates with an illustrative 80% input and 20% output token mix, including Claude's approximate tokenizer difference. Weights are not measured cost per completed task. See [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) and [OpenAI pricing](https://developers.openai.com/api/docs/pricing).
 
-For custom IDs or weights, the model workflow can import a JSON config containing its own pool; the other assistant's pool stays as it was. Existing complete `router-config.json` files remain supported. Configuration resolution is: explicit `--config` in the underlying Python CLI, then `JEV_ROUTER_CONFIG`, then the private runtime config, then `router-config.json` in the current directory, then the bundled default. Each pool's fallback must name one of its models. Use only models available in your assistant subscription and compatible with the worker's tools.
+For custom IDs or weights, the model workflow can import a JSON config containing its own pool; the other assistant's pool stays as it was. A complete `router-config.json` can also be used. Configuration resolution is: explicit `--config` in the underlying Python CLI, then `JEV_ROUTER_CONFIG`, then the private runtime config, then `router-config.json` in the current directory, then the bundled default. Each pool's fallback must name one of its models. Use only models available in your assistant subscription and compatible with the worker's tools.
 
 ### View history
 
-In Claude Code, `/jev-router:history --limit 5 --client claude` shows a filtered table. In Codex, select **Jev Router History** in `/skills` and ask for the last five Codex routes. The underlying history command also supports `--json` for structured output.
+In Claude Code, `/jev-router:history --limit 5 --client claude` shows a filtered table. In Codex, select **Jev Router History** in `/skills` and ask for the last three Codex routes. The underlying history command also supports `--json` for structured output.
 
-Example terminal output (illustrative values):
+Output from the three completed Codex prompts (`--limit 3 --client codex`):
 
 ~~~text
-Recent recommendations, assistant tokens, and notional USD reduction vs the prompt's baseline model
-Negative reduction means an estimated increase; amounts include coordinator usage
-When (UTC)          Client Recommended       Baseline              Main   Worker    Total     Base $   Routed $     Est. Δ$  Tokens
-2026-09-27T14:02:50 codex  gpt-6-luna        gpt-6-sol            1100    11000    12100    0.02640    0.00396    +0.02244  ████████████████
+Recent recommendations and estimated USD reduction vs prompt baseline
+Negative reduction means an increase; costs include coordinator usage
+When (UTC)           Client  Recommended  Baseline
+Coordinator Worker  Total Tokens            Base $ Routed $ Cost Reduction$
+2026-09-28T11:52:50  codex   gpt-6-luna   gpt-6-sol
+     109325 158998 268323 ████████████████ 0.06756  0.05934        +0.00823
+2026-09-28T11:51:46  codex   gpt-6-luna   gpt-6-sol
+      84068  90459 174527 ██████████       0.04744  0.02935        +0.01809
+2026-09-28T11:48:22  codex   gpt-6-luna   gpt-6-sol
+     102319 123202 225521 █████████████    0.06359  0.04878        +0.01481
 ~~~
 
-Main is coordinator usage; Worker is subagent usage. Base $ prices the worker's observed tokens as if the prompt had run on the model active at prompt start. Routed $ adds coordinator usage on that baseline model and worker usage on the recommended model. **Est. Δ$ = Base $ − Routed $**; a negative value means the estimate increased. The comparison uses standard-speed, short-context API list prices per million uncached input, cached input, cache writes, and output tokens as checked on 2026-09-28 in [the pricing table](jev_router/costs.py), with an approximate Claude tokenizer adjustment. These are **what-if USD estimates**, not subscription charges or verified savings. Model behavior, discounts, long-context and fast-mode premiums, longer cache writes, and TypeSafe costs are outside the estimate.
+Across these three routes, history attributed 295,712 coordinator and 372,659 worker tokens. The estimated baseline was $0.17859 and the routed total was $0.13746, a **$0.04112 reduction**. Token counts vary with prompt size, conversation context, and tool use.
+
+Coordinator counts main-assistant tokens; Worker counts subagent tokens. Base $ prices the worker's observed tokens as if the prompt had run on the model active at prompt start. Routed $ adds coordinator usage on that baseline model and worker usage on the recommended model. **Cost Reduction$ = Base $ − Routed $**; a negative value means the estimate increased. The comparison uses standard-speed, short-context API list prices per million uncached input, cached input, cache writes, and output tokens as checked on 2026-09-28 in [the pricing table](jev_router/costs.py), with an approximate Claude tokenizer adjustment. These are **what-if USD estimates**, not subscription charges or verified savings. Model behavior, discounts, long-context and fast-mode premiums, longer cache writes, and TypeSafe costs are outside the estimate.
 
 History uses a private `JEV_ROUTER_HOME/history.sqlite3` SQLite database to store route IDs, model names, transcript paths, and token counts. It does **not** store prompt text or the TypeSafe key. Counts and costs show `unknown` when hooks did not run, usage cannot be matched confidently, or a model has no known price.
 
