@@ -30,41 +30,50 @@ flowchart TB
     subgraph Upper[" "]
         direction LR
 
-        subgraph Prompt
+        subgraph Prompt[" "]
             direction TB
+            P0["Prompt"] --> A
             A[New user prompt] --> B[Hook creates route ID]
         end
 
-        subgraph Selection
+        subgraph Selection[" "]
             direction TB
+            S0["Selection"] --> C
             C[Coordinator calls Jev once] --> D{Valid, confident choice?}
             D -- Yes --> E[Recommended model]
             D -- No --> F[Configured fallback]
         end
     end
 
-    subgraph Execution
+    subgraph Execution[" "]
         direction TB
+        X0["Execution"] --> G
         G[(Save recommendation)] --> H[Worker runs full tool loop]
         H --> I[Completion hooks add token usage]
         I --> J[History command]
     end
 
-    B --> C
-    E --> G
-    F --> G
+    B --> S0
+    E --> X0
+    F --> X0
 
     classDef prompt fill:#FFE8DC,stroke:#D76545,color:#5C2618,stroke-width:2px
     classDef selection fill:#E8DEFA,stroke:#7651B8,color:#35205A,stroke-width:2px
     classDef recommended fill:#DDF3D4,stroke:#469B58,color:#20512A,stroke-width:2px
     classDef fallback fill:#FCE0EA,stroke:#CC5278,color:#682139,stroke-width:2px
     classDef execution fill:#DDF1F5,stroke:#358FA3,color:#174C58,stroke-width:2px
+    classDef promptHeader fill:transparent,stroke:transparent,color:#5C2618,font-weight:bold
+    classDef selectionHeader fill:transparent,stroke:transparent,color:#35205A,font-weight:bold
+    classDef executionHeader fill:transparent,stroke:transparent,color:#174C58,font-weight:bold
 
     class A,B prompt
     class C,D selection
     class E recommended
     class F fallback
     class G,H,I,J execution
+    class P0 promptHeader
+    class S0 selectionHeader
+    class X0 executionHeader
 
     style Upper fill:transparent,stroke:transparent
     style Prompt fill:#FFF6F1,stroke:#E9A48E,stroke-width:2px
@@ -231,7 +240,7 @@ Coordinator Worker  Total Tokens            Base $ Routed $ Cost Reduction$
 
 Across these three routes, history attributed 295,712 coordinator and 372,659 worker tokens. The estimated baseline was $0.17859 and the routed total was $0.13746, a **$0.04112 reduction**. Token counts vary with prompt size, conversation context, and tool use.
 
-Coordinator counts main-assistant tokens; Worker counts subagent tokens. Base $ prices the worker's observed tokens as if the prompt had run on the model active at prompt start. Routed $ adds coordinator usage on that baseline model and worker usage on the recommended model. **Cost Reduction$ = Base $ − Routed $**; a negative value means the estimate increased. The comparison uses standard-speed, short-context API list prices per million uncached input, cached input, cache writes, and output tokens as checked on 2026-09-28 in [the pricing table](jev_router/costs.py), with an approximate Claude tokenizer adjustment. These are **what-if USD estimates**, not subscription charges or verified savings. Model behavior, discounts, long-context and fast-mode premiums, longer cache writes, and TypeSafe costs are outside the estimate.
+Coordinator counts main-assistant tokens; Worker counts subagent tokens. `Base $` prices the worker's observed tokens as if the prompt had run on the model active at prompt start. `Routed $` adds coordinator usage on that baseline model and worker usage on the recommended model. `Cost Reduction$ = Base $ − Routed $`; a negative value means the estimate increased. The comparison uses standard-speed, short-context API list prices per million uncached input, cached input, cache writes, and output tokens as checked on 2026-09-28 in [the pricing table](jev_router/costs.py), with an approximate Claude tokenizer adjustment. These are **what-if USD estimates**, not subscription charges or verified savings. Model behavior, discounts, long-context and fast-mode premiums, longer cache writes, and TypeSafe costs are outside the estimate.
 
 History uses a private `JEV_ROUTER_HOME/history.sqlite3` SQLite database to store route IDs, model names, transcript paths, and token counts. It does **not** store prompt text or the TypeSafe key. Counts and costs show `unknown` when hooks did not run, usage cannot be matched confidently, or a model has no known price.
 
